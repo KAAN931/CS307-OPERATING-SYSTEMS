@@ -26,7 +26,7 @@
 
 // OS bookkeeping constants
 #define PAGE_SIZE       (2048)  // Page size in words (of 2 bytes)
-#define OS_MEM_SIZE     (2)     // OS Region size. Also the start of the page tables' page
+#define OS_MEM_SIZE     (2)     // OS Region size. Also the start of the PTE tables' PTE
 #define Cur_Proc_ID     (0)     // id of the current process
 #define Proc_Count      (1)     // total number of processes, including ones that finished executing.
 #define OS_STATUS       (2)     // Bit 0 shows whether the PCB list is full or not
@@ -140,319 +140,321 @@ void run(char *code, char *heap) {
 // YOUR CODE STARTS HERE
 
 void initOS() {
-//initialize the physical memory
-mem[Cur_Proc_ID]=0xFFFF;
-mem[Proc_Count] = 0;
-mem[OS_STATUS] = 0;
-//free page bitmap uses 3 bits as os reserved and frame 2 as page tables,set them not avaible while others are free
-//1111 1111 1111 1000
-//single memory bit is 16 bits,so it is seperated as 16 16
-mem[OS_FREE_BITMAP] = 0x1FFF;
-//set other 16 bits free
-mem[OS_FREE_BITMAP + 1] = 0xFFFF;
+  mem[Cur_Proc_ID]=0XFFFF;
+  mem[Proc_Count]=0;
+  mem[OS_STATUS]=0x0000;
+  mem[3]=0X1FFF;
+  mem[4]=0XFFFF;
   return;
 }
 
 // Process functions to implement
 int createProc(char *fname, char *hname) {
-//check if the OS segment is full
-uint16_t pid = mem[Proc_Count];
-    if ((mem[OS_STATUS] & 1) || pid >= 64) {
-        printf("The OS memory region is full. Cannot create a new PCB.\n");
-        //set 1 to indicate it is not available
-        mem[OS_STATUS] |= 1; 
-        return 0;
-    }
-//increment count
-mem[Proc_Count]++;
-//PCB set
-uint16_t pcb_addr = 12 + (pid * 3);
-uint16_t ptbr_val = 0x1000 + (pid * 32);
-mem[pcb_addr + PID_PCB] = pid;
-mem[pcb_addr + PC_PCB] = 0x3000;
-mem[pcb_addr + PTBR_PCB] = ptbr_val;
-    //set code segments
-    if (!allocMem(ptbr_val, 6, UINT16_MAX, 0)) {
-        printf("Cannot create code segment.\n");
-        return 0;
-    }
-    // Allocate VPN 7
-    if (!allocMem(ptbr_val, 7, UINT16_MAX, 0)) {
-        printf("Cannot create code segment.\n");
-        freeMem(6, ptbr_val); // Rollback
-        return 0;}
-        //load the code image,extract PFN
-        uint16_t code_offsets[2];
-    code_offsets[0] = (mem[ptbr_val + 6] >> 11) * PAGE_SIZE;
-    code_offsets[1] = (mem[ptbr_val + 7] >> 11) * PAGE_SIZE;
-    //write to tbe physical memory
-    ld_img(fname, code_offsets, 2 * PAGE_SIZE);
-    //allocate code segment
-    if (!allocMem(ptbr_val, 8, UINT16_MAX, UINT16_MAX)) {
-        printf("Cannot create heap segment.\n");
-        freeMem(6, ptbr_val);
-        freeMem(7, ptbr_val);
-        return 0;
-    }
-    if (!allocMem(ptbr_val, 9, UINT16_MAX, UINT16_MAX)) {
-        printf("Cannot create heap segment.\n");
-        freeMem(6, ptbr_val);
-        freeMem(7, ptbr_val);
-        freeMem(8, ptbr_val);
-        return 0;
-    }
-    //load heap image
-    uint16_t heap_offsets[2];
-    heap_offsets[0] = (mem[ptbr_val + 8] >> 11) * PAGE_SIZE;
-    heap_offsets[1] = (mem[ptbr_val + 9] >> 11) * PAGE_SIZE;
-
-    ld_img(hname, heap_offsets, 2 * PAGE_SIZE);
+  uint32_t mem_all=(((uint32_t)mem[3]<<16))|((uint32_t)(mem[4]));
+  uint16_t ones=0;
+for(int i=0;i<32;i++){
+  if((mem_all>>i)&0X0001){
+      ones++;
+  }
+}
+if((mem[OS_STATUS]&0X0001)==0X0001){
+  printf("The OS memory region is full. Cannot create a new PCB.\n");
+  return 0;
+}
+else if(ones<2){
+  printf("Cannot create code segment.\n");
+  return 0;
+}
+else if(ones<4){
+  printf("Cannot create heap segment.\n");
+  return 0;
+}
+else{
+  uint16_t pid=mem[Proc_Count];
+  uint16_t index=(pid*PCB_SIZE)+12;
+  uint16_t ptbr=pid*32+4096;
+  uint16_t allocated1=allocMem(ptbr,6, 0xFFFF, 0);
+  if(!allocated1){
+    printf("Cannot create code segment.\n");
+    return 0;
+  }
+  uint16_t allocated2=allocMem(ptbr,7, 0xFFFF, 0);
+  if(!allocated2){
+    freeMem(6, ptbr);
+    printf("Cannot create code segment.\n");
+    return 0;
+  }
+    uint16_t pfn1=mem[ptbr+6]&0XF800;
+    uint16_t pfn2=mem[ptbr+7]&0XF800;
+    uint16_t page1=pfn1;
+    uint16_t page2=pfn2;
+    uint16_t offsets[2]={page1,page2};
+    ld_img(fname, offsets, 2*PAGE_SIZE);
+  uint16_t Hallocated1=allocMem(ptbr,8, 0xFFFF, 0XFFFF);
+    if(!Hallocated1){
+    freeMem(6, ptbr);
+    freeMem(7, ptbr);
+    printf("Cannot create heap segment.\n");
+    return 0;
+  }
+  uint16_t Hallocated2=allocMem(ptbr,9, 0xFFFF, 0XFFFF);
+    if(!Hallocated2){
+    freeMem(6, ptbr);
+    freeMem(7, ptbr);
+    freeMem(8, ptbr);
+    printf("Cannot create heap segment.\n");
+    return 0;
+  }
+    mem[Proc_Count]++;
+    uint16_t hpfn1=mem[ptbr+8]&0XF800;
+    uint16_t hpfn2=mem[ptbr+9]&0XF800;
+    uint16_t hpage1=hpfn1;
+    uint16_t hpage2=hpfn2;
+    uint16_t hoffsets[2]={hpage1,hpage2};
+    ld_img(hname, hoffsets, 2*PAGE_SIZE);
+      mem[index+PID_PCB]=pid;
+      mem[index+PC_PCB]=0X3000;
+      mem[index+PTBR_PCB]=pid*32+4096;
+}
   return 1;
 }
 
 void loadProc(uint16_t pid) {
-//update current ID
-mem[Cur_Proc_ID] = pid;
-
-//get the pcb adr
-uint16_t pcb_addr = 12 + (pid * 3);
-//load cpu registers
-    reg[RPC] = mem[pcb_addr + PC_PCB];
-    reg[PTBR] = mem[pcb_addr + PTBR_PCB];
+uint16_t index=(pid*PCB_SIZE)+12;
+reg[RPC]=mem[index+PC_PCB];
+reg[PTBR]=mem[index+PTBR_PCB];
+mem[Cur_Proc_ID]=pid;
 }
 
 uint16_t allocMem(uint16_t ptbr, uint16_t vpn, uint16_t read, uint16_t write) {
-//first check if the page is not free
-//calculate the PTE location
-uint16_t pte_addr = ptbr + vpn;
-//check the bit 0
-if (mem[pte_addr] & 0x1) {
+  if(read==0XFFFF){
+    read=1;
+  }
+  if(write==0XFFFF){
+    write=1;
+  }
+  if(mem[ptbr+vpn]&(0X0001)){
     return 0;
   }
-  int pfn=-1;
-  //scan all frames
-for(int i=0;i<32;i++){
-    uint16_t mask = 1 << (15 - (i % 16));
-    //use 16 modulo to corresponding i
-    int bitmap_addr;
-    if(i<16){
-      //lower 16 bits
-      bitmap_addr = OS_FREE_BITMAP;
-    }
-    else{
-      //upper 16 bits
-      bitmap_addr = OS_FREE_BITMAP + 1;
-    }
-    if(mem[bitmap_addr] & mask){
-      pfn=i;
-      mem[bitmap_addr] &= ~mask;
+  uint16_t write_read=(write<<2)|(read<<1);
+  uint16_t found=0;
+  uint16_t id;
+  for(int i=15;i>=0;i--){
+    if(mem[3]&(1<<i)){
+      found=1;
+      id=15-i;
+      mem[3]&=~(1<<i);
       break;
     }
   }
-  //if free frame is not found
-if(pfn==-1){
+  if(found==0){
+  for(int i=15;i>=0;i--){
+    if(mem[4]&(1<<i)){
+      found=1;
+      id=31-i;
+      mem[4]&=~(1<<i);
+      break;
+    }
+  }
+  }
+  if(found==0){
     return 0;
   }
-  //initialize the PTE according to rules
-uint16_t new_pte = (pfn << 11);
-if (write){
-new_pte |= (1 << 2);
-  } 
-  if (read){
- new_pte |= (1 << 1);
-  } 
-  new_pte |= 1; // Set Valid bit
-  mem[pte_addr] = new_pte;
-  return 1;
+  else{
+    mem[vpn+ptbr]=(id<<11)|(write_read)|0X0001;
+    return 1;
+  }
+  return 0;
 }
 
 int freeMem(uint16_t vpn, uint16_t ptbr) {
-uint16_t pte_addr = ptbr + vpn;
-uint16_t pte = mem[pte_addr];
-  //check if valid bit is 0
-if ((pte & 0x1) == 0) { 
-    return 0; 
-  }
-  //get the PFE
-uint16_t pfn = pte >> 11;
-  //determine upper or lower 16 bits
-uint16_t mask = 1 << (15 - (pfn % 16));
-int bitmap_addr;
-if (pfn < 16) {
-      bitmap_addr = OS_FREE_BITMAP;
-  } else {
-      bitmap_addr = OS_FREE_BITMAP + 1;
-  }
-  //mark bit as free
-  mem[bitmap_addr] |= mask;
-  //already clear
-  mem[pte_addr] &= ~1;
+uint16_t page_index=vpn+ptbr;
+uint16_t PTE=mem[page_index];
+if((PTE&0X0001)!=0X0001){
+  return 0;
+}
+else{
+PTE=PTE&0XFFFE;
+uint16_t PFN=((PTE&0XF800)>>11);
+mem[page_index]=PTE;
+if(PFN<16){
+uint16_t index;
+index=15-PFN;
+mem[3]|=(1<<index);
 
-  return 1;
+}
+else{
+uint16_t  index=31-PFN;
+  mem[4]|=(1<<index);
+}
+return 1;
+}
 }
 
+// Instructions to implement
 static inline void tbrk() {
-uint16_t r0 = reg[R0];
-uint16_t vpn = r0 >> 11;
-//seperate three bits
-int16_t protection_alloc = r0 & 0x7;
-//extract W/R/A/F
-int is_alloc = protection_alloc & 1;   // Bit 0
-int read = (protection_alloc >> 1) & 1; // Bit 1
-int write = (protection_alloc >> 2) & 1; // Bit 2
-uint16_t cur_pid = mem[Cur_Proc_ID];
-//check reserved segment
-if (vpn < 3) {
-        printf("Cannot allocate/free memory for the reserved segment.\n");
-        thalt();
-        return;
+    uint32_t mem_all=(((uint32_t)mem[3]<<16))|((uint32_t)(mem[4]));
+  uint16_t ones=0;
+for(int i=0;i<32;i++){
+  if((mem_all>>i)&0X0001){
+      ones++;
+  }
+}
+uint16_t pid=mem[Cur_Proc_ID];
+uint16_t page=reg[R0];
+uint16_t VPN=(page>>11)&0X1F;
+uint16_t page_index=VPN+reg[PTBR];
+uint16_t ptbr=reg[PTBR];
+uint16_t PTE=mem[page_index];
+uint16_t RWA=page&0X0007;
+if(VPN<6){
+  printf("Cannot allocate/free memory for the reserved segment.\n");
+  thalt();
+  return;
+}
+else{
+  if((RWA&0X0001)==0X0001){
+    printf("Heap increase requested by process %u.\n", (unsigned)pid);
+    if((PTE&0x0001)==0X0001){
+      printf("Cannot allocate memory for page %u of pid %u since it is already allocated.\n", (unsigned)VPN, (unsigned)pid);
+      return;
     }
-    if (is_alloc) {
-        printf("Heap increase requested by process %d.\n", cur_pid);
-        //check if already alloc
-        uint16_t pte_addr = reg[PTBR] + vpn;
-        if (mem[pte_addr] & 1) {
-            printf("Cannot allocate memory for page %d of pid %d since it is already allocated.\n", vpn, cur_pid);
-            return;
-        }
-       //check mem is full
-        if (mem[OS_FREE_BITMAP] == 0 && mem[OS_FREE_BITMAP + 1] == 0) {
-            printf("Cannot allocate more space for pid %d since there is no free page frames.\n", cur_pid);
-            return;
-        }
-       //attempt to allocate
-        allocMem(reg[PTBR], vpn, read, write);
-
-    } else {
-        // freeing request
-        printf("Heap decrease requested by process %d.\n", cur_pid);
-
-        //check if not allocated
-        uint16_t pte_addr = reg[PTBR] + vpn;
-        if ((mem[pte_addr] & 1) == 0) {
-            printf("Cannot free memory of page %d of pid %d since it is not allocated.\n", vpn, cur_pid);
-            return;
-        }
-
-        // Perform free
-        freeMem(vpn, reg[PTBR]);
+    if(ones==0){
+      printf("Cannot allocate more space for pid %u since there is no free page frames.\n", (unsigned)pid);
+      return;
     }
+    if((RWA&0x0007)==0X0007){
+      allocMem(ptbr, VPN,0XFFFF , 0XFFFF);
+    }
+    else if((RWA&0X0005)==0X0005){
+      allocMem(ptbr, VPN,0 , 0XFFFF);
+    }
+    else if((RWA&0X0003)==0X0003){
+      allocMem(ptbr, VPN,0XFFFF , 0);
+    }
+    else{
+      allocMem(ptbr, VPN,0 , 0);
+    }
+  }
+  else if((RWA&0X0001)==0X0000){
+    printf("Heap decrease requested by process %u.\n", (unsigned)pid);
+    if((PTE&0x0001)==0X0000){
+      printf("Cannot free memory of page %u of pid %u since it is not allocated.\n", (unsigned)VPN, (unsigned)pid);
+      return;
+    }
+    else{
+      freeMem(VPN, ptbr);
+    }
+  }
+  return;
+}
 }
 
 static inline void tyld() {
-//save current state to pcb
-uint16_t cur_pid = mem[Cur_Proc_ID];
-//find next process that can run
-int start_pid = (cur_pid + 1) % mem[Proc_Count];
-int next_pid = -1;
-//scan frum current pid
-for(int i=0;i<mem[Proc_Count];i++){
-  int temp_pid = (start_pid + i) % mem[Proc_Count];
-        uint16_t temp_pcb = 12 + (temp_pid * 3);     
-         
-        //check if alive
-        if (mem[temp_pcb + PID_PCB] != 0xFFFF) {
-            next_pid = temp_pid;
-            break;
-        }
-}
-//switch if new process found
-if (next_pid != -1 && next_pid != cur_pid) {
-  uint16_t pcb_addr = 12 + (cur_pid * 3);
-        mem[pcb_addr + PC_PCB] = reg[RPC];
-        mem[pcb_addr + PTBR_PCB] = reg[PTBR];
-        printf("We are switching from process %d to %d.\n", cur_pid, next_pid);
-        loadProc(next_pid);
+  uint16_t found=0;
+  uint16_t pid=mem[Cur_Proc_ID];
+  uint16_t index_current=(pid*PCB_SIZE)+12;
+  mem[index_current+PC_PCB]=reg[RPC];
+  mem[index_current+PTBR_PCB]=reg[PTBR];
+  uint16_t size=mem[1];
+  for(int i=0;i<size;i++){
+    pid+=1;
+    uint16_t id=(pid)%size;
+    uint16_t index=(id*PCB_SIZE)+12;
+    uint16_t status=mem[index+PID_PCB];
+    if(status!=0xFFFF){
+      printf("We are switching from process %u to %u.\n", (unsigned)mem[Cur_Proc_ID], (unsigned)id);
+      mem[Cur_Proc_ID]=id;
+      reg[RPC]=mem[index+PC_PCB];
+      reg[PTBR]=mem[index+PTBR_PCB];
+      return;
     }
+  }
 }
 
 // Instructions to modify
 static inline void thalt() {
-  uint16_t cur_pid = mem[Cur_Proc_ID];
-    uint16_t ptbr = reg[PTBR];
-//free all pages
-    for (int vpn = 0; vpn < 32; vpn++) {
-        freeMem(vpn, ptbr);
-    }
-//terminated pcb
-    uint16_t pcb_addr = 12 + (cur_pid * 3);
-    mem[pcb_addr + PID_PCB] = 0xFFFF;
-
-//find next process
-int next_pid = -1;
-int start_pid = (cur_pid + 1) % mem[Proc_Count];
-for (int i = 0; i < mem[Proc_Count]; i++) {
-        int temp_pid = (start_pid + i) % mem[Proc_Count];
-        uint16_t temp_pcb = 12 + (temp_pid * 3);
-        if (mem[temp_pcb + PID_PCB] != 0xFFFF) {
-            next_pid = temp_pid;
-            break;
+  uint16_t pid=mem[Cur_Proc_ID];
+  uint16_t size=mem[1];
+  uint16_t id=pid;
+  uint16_t index_pid=(pid*PCB_SIZE)+12;
+  mem[index_pid+PID_PCB]=0XFFFF;
+  uint16_t ptbr=pid*32+4096;
+for(int j=6;j<32;j++){
+  if((mem[ptbr+j]&0X0001)!=0X0000){
+    freeMem(j, ptbr);
+          }
         }
-    }
-    //switch or terminate
-    if (next_pid != -1) {
-        // Found another process, switch to it
-        loadProc(next_pid);
-    } else {
-        //no process is left
-        running = false;
-    } 
+  for(int i=0;i<size;i++){
+    id+=1;
+    id=(id)%size;
+    uint16_t index=(id*PCB_SIZE)+12;
+    uint16_t status=mem[index+PID_PCB];
+    if(status!=0xFFFF){
+        mem[Cur_Proc_ID]=id;
+        reg[RPC]=mem[index+PC_PCB];
+        reg[PTBR]=mem[index+PTBR_PCB];
+        return;
+      }
+  }
+  running = false; 
 }
 
 static inline uint16_t mr(uint16_t address) {
-//extract vpn offset
-uint16_t vpn = address >> 11;
-uint16_t offset = address & 0x7FF;
-//check reserved region
-if (vpn < 3) {
-        printf("Segmentation fault.\n");
-        exit(1);
-    }
-//get the PTE
-uint16_t pte_addr = reg[PTBR] + vpn;
-uint16_t pte = mem[pte_addr]; 
-//check valid bit
-if ((pte & 0x1) == 0) {
-        printf("Segmentation fault inside free space.\n");
-        exit(1);
-    }
-//check read protection bit
-if ((pte & 0x2) == 0) {
+  uint16_t VPN=(address>>11)&0X1F;
+  uint16_t offset=address&0X7FF;
+  if(VPN<6){
+    printf("Segmentation fault.\n");
+    exit(1);
+  }
+  else{
+    uint16_t page_index=VPN+reg[PTBR];
+    uint16_t PTE=mem[page_index];
+    if(PTE&0X0001){
+      if(PTE&0X0002){
+        uint16_t PFN=PTE&0XF800;
+        uint16_t physical_adress=PFN|offset;
+        return mem[physical_adress];
+      }
+      else{
         printf("Cannot read the page.\n");
         exit(1);
-    } 
-    //translate physical adress by getting upper 5 bits
-    uint16_t pfn = pte >> 11;
-    uint16_t phys_addr = (pfn << 11) | offset;
-    return mem[phys_addr];
+      }
+    }
+    else{
+      printf("Segmentation fault inside free space.\n");
+      exit(1);
+    }
+  }
+  return 0;
 }
-
 static inline void mw(uint16_t address, uint16_t val) {
-  //extract vpn offset
-    uint16_t vpn = address >> 11;
-    uint16_t offset = address & 0x7FF;
-   //reserved region
-    if (vpn < 3) {
-        printf("Segmentation fault.\n");
-        exit(1);
-    }
-    //get PTE
-    uint16_t pte_addr = reg[PTBR] + vpn;
-    uint16_t pte = mem[pte_addr];
-    //valid bit
-    if ((pte & 0x1) == 0) {
-        printf("Segmentation fault inside free space.\n");
-        exit(1);
-    }
-    //protection bit
-    if ((pte & 0x4) == 0) {
+  uint16_t VPN=(address>>11)&0X1F;
+  uint16_t offset=address&0X7FF;
+  if(VPN<6){
+    printf("Segmentation fault.\n");
+    exit(1);
+  }
+  else{
+    uint16_t page_index=VPN+reg[PTBR];
+    uint16_t PTE=mem[page_index];
+    if(PTE&0X01){
+      if(PTE&0X04){
+        uint16_t PFN=PTE&0XF800;
+        uint16_t physical_adress=PFN|offset;
+       mem[physical_adress]=val;
+      }
+      else{
         printf("Cannot write to a read-only page.\n");
         exit(1);
+      }
     }
-    //physical adress
-    uint16_t pfn = pte >> 11;
-    uint16_t phys_addr = (pfn << 11) | offset;
-  mem[phys_addr] = val;
+    else{
+      printf("Segmentation fault inside free space.\n");
+      exit(1);
+    }
+  }
+
 }
 
 // YOUR CODE ENDS HERE
